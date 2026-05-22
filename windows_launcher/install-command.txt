@@ -1,0 +1,8 @@
+# Soul OS One-Line Installer for Windows
+# Copy and paste this command into PowerShell (Run as Administrator):
+
+Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/vikrant-project/soul-os/main/windows_launcher/Install-SoulOS.ps1'))
+
+# Alternative: Download and run manually
+# 1. Download Install-SoulOS.ps1 from GitHub
+# 2. Right-click and "Run with PowerShell" (or run as Admin)
