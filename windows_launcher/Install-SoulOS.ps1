@@ -1,104 +1,52 @@
 #Requires -RunAsAdministrator
-<#
-.SYNOPSIS
-    Soul OS Windows Installer - Installs Soul OS via WSL2
-.DESCRIPTION
-    This script downloads and installs Soul OS as a WSL2 distribution
-    on Windows 10/11 systems.
-.NOTES
-    Version:        1.0.0
-    Author:         Soul OS Team
-    Requires:       Windows 10 version 1903+ or Windows 11
-                    Administrator privileges
-#>
-
 param(
     [string]$InstallPath = "$env:USERPROFILE\SoulOS",
-    [switch]$Uninstall,
-    [switch]$NoGUI
+    [switch]$Uninstall
 )
 
-# Colors and styling
 $Host.UI.RawUI.WindowTitle = "Soul OS Installer"
-$colors = @{
-    Primary   = "Magenta"
-    Secondary = "Cyan"
-    Success   = "Green"
-    Warning   = "Yellow"
-    Error     = "Red"
-    Info      = "White"
-}
 
 function Write-Banner {
-    $banner = @"
-
-  ███████╗ ██████╗ ██╗   ██╗██╗          ██████╗ ███████╗
-  ██╔════╝██╔═══██╗██║   ██║██║         ██╔═══██╗██╔════╝
-  ███████╗██║   ██║██║   ██║██║         ██║   ██║███████╗
-  ╚════██║██║   ██║██║   ██║██║         ██║   ██║╚════██║
-  ███████║╚██████╔╝╚██████╔╝███████╗    ╚██████╔╝███████║
-  ╚══════╝ ╚═════╝  ╚═════╝ ╚══════╝     ╚═════╝ ╚══════╝
-
-       W I N D O W S   I N S T A L L E R   v 1.0.0
-
-         Lightweight • Fast • Beautiful
-
-"@
-    Write-Host $banner -ForegroundColor $colors.Secondary
+    Write-Host ""
+    Write-Host "  ========================================" -ForegroundColor Magenta
+    Write-Host "           S O U L   O S" -ForegroundColor Cyan
+    Write-Host "      Windows Installer v1.0.0" -ForegroundColor Magenta
+    Write-Host "  ========================================" -ForegroundColor Magenta
+    Write-Host ""
 }
 
 function Write-Step {
     param([string]$Message, [string]$Status = "INFO")
-    $icon = switch ($Status) {
-        "INFO"    { "[*]" }
-        "SUCCESS" { "[✓]" }
-        "WARNING" { "[!]" }
-        "ERROR"   { "[✗]" }
-        "WAIT"    { "[~]" }
+    switch ($Status) {
+        "INFO"    { Write-Host "[*] $Message" -ForegroundColor White }
+        "SUCCESS" { Write-Host "[+] $Message" -ForegroundColor Green }
+        "WARNING" { Write-Host "[!] $Message" -ForegroundColor Yellow }
+        "ERROR"   { Write-Host "[X] $Message" -ForegroundColor Red }
+        "WAIT"    { Write-Host "[~] $Message" -ForegroundColor Cyan }
     }
-    $color = switch ($Status) {
-        "INFO"    { $colors.Info }
-        "SUCCESS" { $colors.Success }
-        "WARNING" { $colors.Warning }
-        "ERROR"   { $colors.Error }
-        "WAIT"    { $colors.Secondary }
-    }
-    Write-Host "$icon " -ForegroundColor $color -NoNewline
-    Write-Host $Message
 }
 
-function Test-SystemRequirements {
+function Test-Requirements {
     Write-Step "Checking system requirements..." "WAIT"
     
-    # Check Windows version
-    $osVersion = [System.Environment]::OSVersion.Version
     $buildNumber = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion").CurrentBuild
-    
-    if ($buildNumber -lt 18362) {
-        Write-Step "Windows 10 version 1903 or higher required (Build 18362+)" "ERROR"
-        Write-Step "Current build: $buildNumber" "INFO"
+    if ([int]$buildNumber -lt 18362) {
+        Write-Step "Windows 10 version 1903+ required (Build 18362+). Current: $buildNumber" "ERROR"
         return $false
     }
-    Write-Step "Windows version: OK (Build $buildNumber)" "SUCCESS"
+    Write-Step "Windows version OK (Build $buildNumber)" "SUCCESS"
     
-    # Check available disk space (minimum 20GB)
-    $drive = (Split-Path $InstallPath -Qualifier)
+    $drive = Split-Path $InstallPath -Qualifier
     $disk = Get-WmiObject Win32_LogicalDisk -Filter "DeviceID='$drive'"
-    $freeSpaceGB = [math]::Round($disk.FreeSpace / 1GB, 2)
-    
-    if ($freeSpaceGB -lt 20) {
-        Write-Step "Insufficient disk space. Need 20GB, have ${freeSpaceGB}GB" "ERROR"
+    $freeGB = [math]::Round($disk.FreeSpace / 1GB, 2)
+    if ($freeGB -lt 15) {
+        Write-Step "Need 15GB free space. Available: $freeGB GB" "ERROR"
         return $false
     }
-    Write-Step "Disk space: OK (${freeSpaceGB}GB available)" "SUCCESS"
+    Write-Step "Disk space OK ($freeGB GB available)" "SUCCESS"
     
-    # Check RAM (minimum 4GB, recommended 8GB)
-    $ram = [math]::Round((Get-WmiObject Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 2)
-    if ($ram -lt 4) {
-        Write-Step "Minimum 4GB RAM required. You have ${ram}GB" "WARNING"
-    } else {
-        Write-Step "RAM: OK (${ram}GB)" "SUCCESS"
-    }
+    $ramGB = [math]::Round((Get-WmiObject Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 2)
+    Write-Step "RAM OK ($ramGB GB)" "SUCCESS"
     
     return $true
 }
@@ -106,227 +54,167 @@ function Test-SystemRequirements {
 function Enable-WSL {
     Write-Step "Checking WSL status..." "WAIT"
     
-    # Check if WSL is installed
     $wslFeature = Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux
     $vmFeature = Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform
     
-    $restartRequired = $false
+    $needRestart = $false
     
     if ($wslFeature.State -ne "Enabled") {
-        Write-Step "Enabling Windows Subsystem for Linux..." "WAIT"
+        Write-Step "Enabling WSL..." "WAIT"
         Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux -NoRestart | Out-Null
-        $restartRequired = $true
+        $needRestart = $true
     }
     
     if ($vmFeature.State -ne "Enabled") {
         Write-Step "Enabling Virtual Machine Platform..." "WAIT"
         Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -NoRestart | Out-Null
-        $restartRequired = $true
+        $needRestart = $true
     }
     
-    if ($restartRequired) {
-        Write-Step "WSL components enabled. System restart required." "WARNING"
+    if ($needRestart) {
+        Write-Step "WSL components enabled. RESTART REQUIRED." "WARNING"
         Write-Step "After restart, run this installer again." "INFO"
-        $restart = Read-Host "Restart now? (Y/N)"
-        if ($restart -eq "Y" -or $restart -eq "y") {
+        $answer = Read-Host "Restart now? (Y/N)"
+        if ($answer -eq "Y" -or $answer -eq "y") {
             Restart-Computer -Force
         }
         exit 1
     }
     
-    Write-Step "WSL: Enabled" "SUCCESS"
-    
-    # Set WSL2 as default
-    Write-Step "Setting WSL2 as default version..." "WAIT"
+    Write-Step "WSL enabled" "SUCCESS"
     wsl --set-default-version 2 2>$null
     Write-Step "WSL2 set as default" "SUCCESS"
 }
 
-function Get-SoulOS {
-    Write-Step "Downloading Soul OS..." "WAIT"
+function Download-SoulOS {
+    Write-Step "Preparing download..." "WAIT"
     
-    # Create install directory
     if (-not (Test-Path $InstallPath)) {
         New-Item -ItemType Directory -Path $InstallPath -Force | Out-Null
     }
     
-    $rootfsUrl = "https://github.com/vikrant-project/soul-os/releases/latest/download/soul_os_rootfs.tar.gz"
+    $rootfsUrl = "https://github.com/vikrant-project/soul-os/raw/main/soul_os_rootfs.tar.gz"
     $rootfsPath = Join-Path $InstallPath "soul_os_rootfs.tar.gz"
     
+    Write-Step "Downloading Soul OS (1.1GB)..." "WAIT"
+    Write-Host "    This may take several minutes..." -ForegroundColor Gray
+    
     try {
-        # Use BITS for better download handling
-        Start-BitsTransfer -Source $rootfsUrl -Destination $rootfsPath -DisplayName "Downloading Soul OS"
+        $ProgressPreference = 'SilentlyContinue'
+        Invoke-WebRequest -Uri $rootfsUrl -OutFile $rootfsPath -UseBasicParsing
+        $ProgressPreference = 'Continue'
         Write-Step "Download complete" "SUCCESS"
     }
     catch {
-        Write-Step "BITS transfer failed, trying WebClient..." "WARNING"
-        try {
-            $webClient = New-Object System.Net.WebClient
-            $webClient.DownloadFile($rootfsUrl, $rootfsPath)
-            Write-Step "Download complete" "SUCCESS"
-        }
-        catch {
-            Write-Step "Download failed: $_" "ERROR"
-            return $false
-        }
+        Write-Step "Download failed: $_" "ERROR"
+        return $null
     }
     
     return $rootfsPath
 }
 
-function Install-SoulOSDistro {
+function Install-Distro {
     param([string]$RootfsPath)
     
-    Write-Step "Installing Soul OS WSL distribution..." "WAIT"
+    Write-Step "Installing Soul OS distribution..." "WAIT"
     
-    # Check if already registered
-    $existingDistros = wsl --list --quiet 2>$null
-    if ($existingDistros -match "SoulOS") {
-        Write-Step "Soul OS already installed. Removing old installation..." "WARNING"
+    $existing = wsl --list --quiet 2>$null
+    if ($existing -match "SoulOS") {
+        Write-Step "Removing existing installation..." "WARNING"
         wsl --unregister SoulOS 2>$null
     }
     
-    # Import the distribution
     $distroPath = Join-Path $InstallPath "distro"
     if (-not (Test-Path $distroPath)) {
         New-Item -ItemType Directory -Path $distroPath -Force | Out-Null
     }
     
-    Write-Step "Importing rootfs (this may take a few minutes)..." "WAIT"
+    Write-Step "Importing rootfs (this takes a few minutes)..." "WAIT"
     wsl --import SoulOS $distroPath $RootfsPath --version 2
     
     if ($LASTEXITCODE -ne 0) {
-        Write-Step "Failed to import WSL distribution" "ERROR"
+        Write-Step "Import failed" "ERROR"
         return $false
     }
     
-    Write-Step "Soul OS installed successfully!" "SUCCESS"
-    
-    # Set as default distro
+    Write-Step "Soul OS installed" "SUCCESS"
     wsl --set-default SoulOS
-    Write-Step "Soul OS set as default WSL distribution" "SUCCESS"
+    Write-Step "Set as default WSL distribution" "SUCCESS"
     
-    # Clean up rootfs
     Remove-Item $RootfsPath -Force -ErrorAction SilentlyContinue
-    
     return $true
 }
 
 function Create-Shortcuts {
     Write-Step "Creating shortcuts..." "WAIT"
     
-    # Desktop shortcut
-    $desktopPath = [Environment]::GetFolderPath("Desktop")
-    $shortcutPath = Join-Path $desktopPath "Soul OS.lnk"
-    
+    $desktop = [Environment]::GetFolderPath("Desktop")
     $shell = New-Object -ComObject WScript.Shell
-    $shortcut = $shell.CreateShortcut($shortcutPath)
+    
+    $shortcut = $shell.CreateShortcut("$desktop\Soul OS.lnk")
     $shortcut.TargetPath = "wsl.exe"
     $shortcut.Arguments = "-d SoulOS"
     $shortcut.Description = "Launch Soul OS"
-    $shortcut.WorkingDirectory = "%USERPROFILE%"
     $shortcut.Save()
     
     Write-Step "Desktop shortcut created" "SUCCESS"
-    
-    # Start menu shortcut
-    $startMenuPath = [Environment]::GetFolderPath("Programs")
-    $soulMenuPath = Join-Path $startMenuPath "Soul OS"
-    if (-not (Test-Path $soulMenuPath)) {
-        New-Item -ItemType Directory -Path $soulMenuPath -Force | Out-Null
-    }
-    
-    $startShortcut = $shell.CreateShortcut((Join-Path $soulMenuPath "Soul OS.lnk"))
-    $startShortcut.TargetPath = "wsl.exe"
-    $startShortcut.Arguments = "-d SoulOS"
-    $startShortcut.Description = "Launch Soul OS"
-    $startShortcut.Save()
-    
-    Write-Step "Start menu shortcuts created" "SUCCESS"
 }
 
-function Show-CompletionMessage {
+function Show-Complete {
     Write-Host ""
-    Write-Host "╔══════════════════════════════════════════════════════════════╗" -ForegroundColor $colors.Success
-    Write-Host "║                                                              ║" -ForegroundColor $colors.Success
-    Write-Host "║          Soul OS Installation Complete!                      ║" -ForegroundColor $colors.Success
-    Write-Host "║                                                              ║" -ForegroundColor $colors.Success
-    Write-Host "╚══════════════════════════════════════════════════════════════╝" -ForegroundColor $colors.Success
+    Write-Host "  ========================================" -ForegroundColor Green
+    Write-Host "     Soul OS Installed Successfully!" -ForegroundColor Green
+    Write-Host "  ========================================" -ForegroundColor Green
     Write-Host ""
-    Write-Host "  Quick Start:" -ForegroundColor $colors.Secondary
-    Write-Host "  • Launch from Desktop shortcut 'Soul OS'" -ForegroundColor $colors.Info
-    Write-Host "  • Or run: " -ForegroundColor $colors.Info -NoNewline
-    Write-Host "wsl -d SoulOS" -ForegroundColor $colors.Primary
+    Write-Host "  Launch: " -NoNewline -ForegroundColor White
+    Write-Host "wsl -d SoulOS" -ForegroundColor Cyan
+    Write-Host "  Or double-click 'Soul OS' on Desktop" -ForegroundColor White
     Write-Host ""
-    Write-Host "  Default Credentials:" -ForegroundColor $colors.Secondary
-    Write-Host "  • Username: soul" -ForegroundColor $colors.Info
-    Write-Host "  • Password: soul" -ForegroundColor $colors.Info
-    Write-Host ""
-    Write-Host "  For GUI apps, install WSLg or VcXsrv." -ForegroundColor $colors.Warning
+    Write-Host "  Default credentials:" -ForegroundColor Yellow
+    Write-Host "    Username: soul" -ForegroundColor White
+    Write-Host "    Password: soul" -ForegroundColor White
     Write-Host ""
 }
 
-function Uninstall-SoulOS {
-    Write-Banner
-    Write-Step "Uninstalling Soul OS..." "WAIT"
-    
-    # Unregister WSL distribution
-    wsl --unregister SoulOS 2>$null
-    
-    # Remove install directory
-    if (Test-Path $InstallPath) {
-        Remove-Item $InstallPath -Recurse -Force
-    }
-    
-    # Remove shortcuts
-    $desktopPath = [Environment]::GetFolderPath("Desktop")
-    Remove-Item (Join-Path $desktopPath "Soul OS.lnk") -Force -ErrorAction SilentlyContinue
-    
-    $startMenuPath = [Environment]::GetFolderPath("Programs")
-    Remove-Item (Join-Path $startMenuPath "Soul OS") -Recurse -Force -ErrorAction SilentlyContinue
-    
-    Write-Step "Soul OS uninstalled successfully" "SUCCESS"
-}
-
-# Main execution
+# Main
 Clear-Host
 Write-Banner
 
 if ($Uninstall) {
-    Uninstall-SoulOS
+    Write-Step "Uninstalling Soul OS..." "WAIT"
+    wsl --unregister SoulOS 2>$null
+    Remove-Item $InstallPath -Recurse -Force -ErrorAction SilentlyContinue
+    $desktop = [Environment]::GetFolderPath("Desktop")
+    Remove-Item "$desktop\Soul OS.lnk" -Force -ErrorAction SilentlyContinue
+    Write-Step "Soul OS uninstalled" "SUCCESS"
     exit 0
 }
 
-Write-Host "  Installation Path: $InstallPath" -ForegroundColor $colors.Info
+Write-Host "  Install path: $InstallPath" -ForegroundColor Gray
 Write-Host ""
 
-# Check requirements
-if (-not (Test-SystemRequirements)) {
-    Write-Step "System requirements not met" "ERROR"
+if (-not (Test-Requirements)) {
+    Write-Step "Requirements not met" "ERROR"
+    Read-Host "Press Enter to exit"
     exit 1
 }
 
-# Enable WSL
 Enable-WSL
 
-# Download Soul OS
-$rootfsPath = Get-SoulOS
-if (-not $rootfsPath) {
-    Write-Step "Failed to download Soul OS" "ERROR"
+$rootfs = Download-SoulOS
+if (-not $rootfs) {
+    Write-Step "Download failed" "ERROR"
+    Read-Host "Press Enter to exit"
     exit 1
 }
 
-# Install distribution
-if (-not (Install-SoulOSDistro -RootfsPath $rootfsPath)) {
+if (-not (Install-Distro -RootfsPath $rootfs)) {
     Write-Step "Installation failed" "ERROR"
+    Read-Host "Press Enter to exit"
     exit 1
 }
 
-# Create shortcuts
 Create-Shortcuts
+Show-Complete
 
-# Show completion
-Show-CompletionMessage
-
-Write-Host "Press any key to exit..." -ForegroundColor $colors.Info
-$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+Read-Host "Press Enter to exit"
